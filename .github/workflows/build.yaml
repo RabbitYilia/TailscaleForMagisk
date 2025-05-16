@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: tailscale/tailscale
-          ref: v${{ vars.TAILSCALE_BRANCH }}
+          ref: v1.82.5
           path: tailscale
       - name: apply patch & build
         run: |
