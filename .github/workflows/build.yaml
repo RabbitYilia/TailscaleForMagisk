@@ -8,46 +8,72 @@ jobs:
     permissions: write-all
     environment: production
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout TailscaleForMagisk
         uses: actions/checkout@v4
         with:
           path: TailscaleForMagisk
+
+      - name: Get latest Tailscale release tag
+        id: get_latest
+        run: |
+          TAG=$(curl -s https://api.github.com/repos/tailscale/tailscale/releases/latest | jq -r .tag_name)
+          echo "LATEST_TAG=${TAG}" >> $GITHUB_ENV
+          echo "Latest tag: $TAG"
+
       - name: Checkout tailscale
         uses: actions/checkout@v4
         with:
           repository: tailscale/tailscale
-          ref: v1.82.5
+          ref: ${{ env.LATEST_TAG }}
           path: tailscale
+
       - name: apply patch & build
         run: |
           cd tailscale
           patch -p1 < ../TailscaleForMagisk/feature_support_android_lastest.patch
-          make buildandroid
+
+          # Git hashes
+          T_SHA=$(git rev-parse --short=8 HEAD)
+          P_SHA=$(cd ../TailscaleForMagisk && git rev-parse --short=8 HEAD)
+
+          # Make version.Long
+          VERSION_LONG="${{ env.LATEST_TAG#v }}-t${T_SHA}-g${P_SHA}"
+          echo "VERSION_LONG=${VERSION_LONG}"
+
+          # Build Android version
+          make buildandroid EXTRA_LDFLAGS="-X tailscale.com/version.Long=${VERSION_LONG}"
+
           cp /home/runner/go/bin/android_arm64/tailscale ../TailscaleForMagisk/src
           cp /home/runner/go/bin/android_arm64/tailscaled ../TailscaleForMagisk/src
           cd ..
+
       - name: Update version and versionCode
         run: |
           current_date=$(date +'%Y%m%d')
-          sed -i "s/^version=.*/version=v${{ vars.TAILSCALE_BRANCH }}/" TailscaleForMagisk/src/module.prop
+          sed -i "s/^version=.*/version=${{ env.LATEST_TAG }}/" TailscaleForMagisk/src/module.prop
           sed -i "s/^versionCode=.*/versionCode=$current_date/" TailscaleForMagisk/src/module.prop
+
       - name: Archive project
         run: cd TailscaleForMagisk/src && zip -r ../../TailscaleForMagisk.zip *
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: project-archive
           path: TailscaleForMagisk.zip
+
       - name: Create Tag
         uses: mathieudutour/github-tag-action@v5.6
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          custom_tag: ${{ vars.TAILSCALE_BRANCH }}
+          custom_tag: ${{ env.LATEST_TAG }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ vars.TAILSCALE_BRANCH }}
+          tag_name: ${{ env.LATEST_TAG }}
           files: TailscaleForMagisk.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
