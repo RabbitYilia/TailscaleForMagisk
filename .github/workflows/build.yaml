@@ -20,7 +20,7 @@ jobs:
         run: |
           TAG=$(curl -s https://api.github.com/repos/tailscale/tailscale/releases/latest | jq -r .tag_name)
           echo "LATEST_TAG=${TAG}" >> $GITHUB_ENV
-          echo "Latest tag: $TAG"
+          echo "Latest Tailscale tag: $TAG"
 
       - name: Checkout tailscale
         uses: actions/checkout@v4
@@ -29,34 +29,41 @@ jobs:
           ref: ${{ env.LATEST_TAG }}
           path: tailscale
 
-      - name: apply patch & build
+      - name: Apply patch & build
         run: |
           cd tailscale
+
+          # Apply patch for Android support
           patch -p1 < ../TailscaleForMagisk/feature_support_android_lastest.patch
 
-          # Git hashes
+          # Git hashes for version.Long
           T_SHA=$(git rev-parse --short=8 HEAD)
           P_SHA=$(cd ../TailscaleForMagisk && git rev-parse --short=8 HEAD)
 
-          # Make version.Long
-          VERSION_LONG="${{ env.LATEST_TAG#v }}-t${T_SHA}-g${P_SHA}"
+          # Strip leading 'v' from latest tag in Bash
+          CLEAN_VERSION="${LATEST_TAG#v}"
+          VERSION_LONG="${CLEAN_VERSION}-t${T_SHA}-g${P_SHA}"
           echo "VERSION_LONG=${VERSION_LONG}"
 
-          # Build Android version
+          # Build Tailscale Android binaries with custom version.Long
           make buildandroid EXTRA_LDFLAGS="-X tailscale.com/version.Long=${VERSION_LONG}"
 
+          # Copy binaries into Magisk module
           cp /home/runner/go/bin/android_arm64/tailscale ../TailscaleForMagisk/src
           cp /home/runner/go/bin/android_arm64/tailscaled ../TailscaleForMagisk/src
+
           cd ..
 
       - name: Update version and versionCode
         run: |
-          current_date=$(date +'%Y%m%d')
-          sed -i "s/^version=.*/version=${{ env.LATEST_TAG }}/" TailscaleForMagisk/src/module.prop
-          sed -i "s/^versionCode=.*/versionCode=$current_date/" TailscaleForMagisk/src/module.prop
+          CURRENT_DATE=$(date +'%Y%m%d')
+          sed -i "s/^version=.*/version=${LATEST_TAG}/" TailscaleForMagisk/src/module.prop
+          sed -i "s/^versionCode=.*/versionCode=$CURRENT_DATE/" TailscaleForMagisk/src/module.prop
 
       - name: Archive project
-        run: cd TailscaleForMagisk/src && zip -r ../../TailscaleForMagisk.zip *
+        run: |
+          cd TailscaleForMagisk/src
+          zip -r ../../TailscaleForMagisk.zip *
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
